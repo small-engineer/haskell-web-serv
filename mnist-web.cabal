@@ -7,11 +7,14 @@ executable mnist-web
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:
-    App.Server
-    App.Types
-    App.Auth
-    App.Templates
-    App.DB
+      App.Server
+      App.Types
+      App.Auth
+      App.Templates
+      App.DB
+      App.Board
+      App.BoardExport
+      App.Env
   default-language:    Haskell2010
   ghc-options:         -O2 -Wall
 
@@ -24,7 +27,10 @@ executable mnist-web
     , text
     , blaze-html
     , sqlite-simple
-    ,  directory
-    ,  jwt
-    ,  time
-    ,  bcrypt
+    , directory
+    , filepath
+    , jwt
+    , time
+    , bcrypt
+    , stm
+    , mtl

@@ -1,18 +1,29 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module App.Auth
-  ( Token,
-    issueToken,
-    verifyToken,
-  )
-where
+  ( Token
+  , issueToken
+  , verifyToken
+  , loadJwtSecret
+  ) where
 
+import App.Env
+  ( AppM
+  , Env(..)
+  )
 import App.Types
+  ( AuthUser(..)
+  , UserName(..)
+  , mkAuthUser
+  )
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Reader (ask)
 import qualified Data.ByteString.Char8 as B8
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (NominalDiffTime)
-import Data.Time.Clock.POSIX (getPOSIXTime)
+import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import System.Environment (lookupEnv)
 import qualified Web.JWT as J
 
@@ -24,8 +35,8 @@ tokenTTL = 3600
 clockLeeway :: NominalDiffTime
 clockLeeway = 60
 
-getSecretText :: IO T.Text
-getSecretText = do
+loadJwtSecret :: IO Text
+loadJwtSecret = do
   m <- lookupEnv "JWT_SECRET"
   case m of
     Nothing ->
@@ -36,17 +47,20 @@ getSecretText = do
             then fail "JWT_SECRET is too short; use at least 16 characters"
             else pure t
 
-issueToken :: User -> IO Token
-issueToken u = do
-  secTxt <- getSecretText
-  now    <- getPOSIXTime
+issueToken :: AuthUser -> AppM Token
+issueToken au = do
+  env <- ask
+  now <- liftIO getPOSIXTime
 
-  let mIss = J.stringOrURI "mnist-web"
-  let mSub = J.stringOrURI (userName u)
-  let iat  = J.numericDate now
-  let expv = J.numericDate (now + tokenTTL)
+  let secTxt = envJwtSecret env
 
-  let claims =
+      mIss = J.stringOrURI "mnist-web"
+      UserName nmTxt = authUserName au
+      mSub = J.stringOrURI nmTxt
+      iat  = J.numericDate now
+      expv = J.numericDate (now + realToFrac tokenTTL)
+
+      claims =
         J.JWTClaimsSet
           { J.iss = mIss
           , J.sub = mSub
@@ -58,28 +72,30 @@ issueToken u = do
           , J.unregisteredClaims = mempty
           }
 
-  let signer :: J.EncodeSigner
+      signer :: J.EncodeSigner
       signer = J.hmacSecret secTxt
 
-  let header :: J.JOSEHeader
+      header :: J.JOSEHeader
       header = mempty { J.alg = Just J.HS256 }
 
-  let jwtTxt = J.encodeSigned signer header claims
+      jwtTxt = J.encodeSigned signer header claims
 
   pure (TE.encodeUtf8 jwtTxt)
 
-verifyToken :: Token -> IO (Maybe User)
+verifyToken :: Token -> AppM (Maybe AuthUser)
 verifyToken tok = do
-  secTxt <- getSecretText
-  now    <- getPOSIXTime
+  env <- ask
+  now <- liftIO getPOSIXTime
 
-  let signer :: J.EncodeSigner
+  let secTxt = envJwtSecret env
+
+      signer :: J.EncodeSigner
       signer = J.hmacSecret secTxt
 
-  let verifier :: J.VerifySigner
+      verifier :: J.VerifySigner
       verifier = J.toVerify signer
 
-  let mJwt = J.decodeAndVerifySignature verifier (TE.decodeUtf8 tok)
+      mJwt = J.decodeAndVerifySignature verifier (TE.decodeUtf8 tok)
 
   case mJwt of
     Nothing -> pure Nothing
@@ -90,8 +106,9 @@ verifyToken tok = do
             case J.exp cs of
               Nothing -> False
               Just nd ->
-                let t = J.secondsSinceEpoch nd
-                 in now <= t + clockLeeway
+                let t :: POSIXTime
+                    t = J.secondsSinceEpoch nd
+                 in now <= t + realToFrac clockLeeway
 
           issOk =
             case J.iss cs of
@@ -100,8 +117,8 @@ verifyToken tok = do
 
           mSubTxt = J.sub cs >>= Just . J.stringOrURIToText
 
-      in if not (expOk && issOk)
-           then pure Nothing
-           else case mSubTxt of
-                  Nothing -> pure Nothing
-                  Just nm -> pure (Just (User nm ""))
+       in if not (expOk && issOk)
+            then pure Nothing
+            else case mSubTxt of
+                   Nothing    -> pure Nothing
+                   Just subjT -> pure (Just (mkAuthUser (UserName subjT)))

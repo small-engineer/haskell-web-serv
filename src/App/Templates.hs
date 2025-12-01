@@ -1,15 +1,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module App.Templates
-  ( loginPage,
-    registerPage,
-    homePage,
-    htmlResponse,
-    postsFragment
-  )
-where
+  ( loginPage
+  , registerPage
+  , homePage
+  , htmlResponse
+  , postsFragment
+  ) where
 
 import App.Types
+  ( AuthUser(..)
+  , UserName(..)
+  , Post(..)
+  , PostId(..)
+  , NonEmptyBody(..)
+  , formatCreatedAtText
+  )
 import Data.Text (Text)
 import qualified Data.Text as T
 import Network.HTTP.Types (Status)
@@ -99,10 +105,10 @@ registerPage err =
       H.p H.! A.style "margin-top: 1rem;" $ do
         H.a H.! A.href "/login" $ "ログイン画面へ戻る"
 
-homePage :: User -> Text -> [Post] -> Html
+homePage :: AuthUser -> Text -> [Post] -> Html
 homePage u csrfTok posts =
   H.docTypeHtml $ do
-    let isAdminUser = userName u == "Admin"
+    let isAdminUser = authIsAdmin u
     H.head $ do
       H.meta H.! A.charset "utf-8"
       H.title "Home"
@@ -116,7 +122,8 @@ homePage u csrfTok posts =
       H.h1 "Home"
       H.p $ do
         H.toHtml ("ログイン中のユーザー: " :: Text)
-        H.strong (H.toHtml (userName u))
+        let UserName nm = authUserName u
+        H.strong (H.toHtml nm)
       H.p $ do
         H.a H.! A.href "/logout" $ "ログアウト"
       H.hr
@@ -159,35 +166,40 @@ postsFragment isAdminUser csrfTok ps =
 
 renderPost :: Bool -> Text -> Post -> H.Html
 renderPost isAdminUser csrfTok p =
-  H.li
-    H.! A.style "margin-bottom: 0.5rem;"
-    H.! H.dataAttribute "id" (H.toValue (show (postId p))) $ do
-      H.div $ do
-        H.strong (H.toHtml (postAuthor p))
-        H.toHtml (" さん " :: Text)
-        H.span H.! A.style "color: #888; font-size: 0.8rem; margin-left: 0.5rem;" $
-          H.toHtml (postCreatedAt p)
-      H.div $
-        H.toHtml (postBody p)
-      if isAdminUser
-        then do
-          H.form
-            H.! A.method "post"
-            H.! A.action "/posts/delete"
-            H.! A.style "margin-top: 0.25rem;" $ do
-              H.input
-                H.! A.type_ "hidden"
-                H.! A.name "csrf"
-                H.! A.value (H.toValue csrfTok)
-              H.input
-                H.! A.type_ "hidden"
-                H.! A.name "id"
-                H.! A.value (H.toValue (show (postId p)))
-              H.button
-                H.! A.type_ "submit"
-                H.! A.style "font-size: 0.8rem; color: #c00;" $
-                "削除"
-        else pure ()
+  let PostId pid           = postId p
+      UserName authorTxt   = postAuthor p
+      NonEmptyBody bodyTxt = postBody p
+      createdTxt           = formatCreatedAtText (postCreatedAt p)
+   in H.li
+        H.! A.style "margin-bottom: 0.5rem;"
+        H.! H.dataAttribute "id" (H.toValue pid) $ do
+             H.div $ do
+               H.strong (H.toHtml authorTxt)
+               H.toHtml (" さん " :: Text)
+               H.span
+                 H.! A.style "color: #888; font-size: 0.8rem; margin-left: 0.5rem;" $
+                 H.toHtml createdTxt
+             H.div $
+               H.toHtml bodyTxt
+             if isAdminUser
+               then do
+                 H.form
+                   H.! A.method "post"
+                   H.! A.action "/posts/delete"
+                   H.! A.style "margin-top: 0.25rem;" $ do
+                     H.input
+                       H.! A.type_ "hidden"
+                       H.! A.name "csrf"
+                       H.! A.value (H.toValue csrfTok)
+                     H.input
+                       H.! A.type_ "hidden"
+                       H.! A.name "id"
+                       H.! A.value (H.toValue pid)
+                     H.button
+                       H.! A.type_ "submit"
+                       H.! A.style "font-size: 0.8rem; color: #c00;" $
+                       "削除"
+               else pure ()
 
 autoReloadJs :: Text
 autoReloadJs =

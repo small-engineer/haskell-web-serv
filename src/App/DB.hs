@@ -1,57 +1,51 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module App.DB
-  ( withConn,
-    findUser,
-    createUser,
-    listRecentPosts,
-    addPost,
-    deletePost,
-  )
-where
+  ( withConn
+  , findUser
+  , createUser
+  , listRecentPosts
+  , addPost
+  , deletePost
+  ) where
 
 import App.Types
-import Control.Exception (SomeException, try)
-import Control.Monad (when)
+  ( CreatedAt(..)
+  , NonEmptyBody(..)
+  , Password(..)
+  , Post(..)
+  , PostId(..)
+  , User(..)
+  , UserName(..)
+  , formatCreatedAtText
+  , mkNonEmptyBody
+  , parseCreatedAtText
+  )
 import qualified Crypto.BCrypt as BC
+import Data.Int (Int64)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Time (getCurrentTime)
-import Data.Time.Format (defaultTimeLocale, formatTime)
 import Database.SQLite.Simple
-  ( Connection,
-    Only (..),
-    close,
-    execute,
-    execute_,
-    open,
-    query,
-    query_,
-  )
-import Database.SQLite.Simple.FromRow
-  ( FromRow (..),
-    field,
+  ( Connection
+  , Only(..)
+  , close
+  , execute
+  , execute_
+  , lastInsertRowId
+  , open
+  , query
+  , query_
   )
 import System.Directory (createDirectoryIfMissing)
+import System.FilePath (takeDirectory)
+import Control.Exception (catch)
 
-dbDir :: FilePath
-dbDir = "db"
-
-dbPath :: FilePath
-dbPath = dbDir ++ "/mnist-web.db"
-
-instance FromRow Post where
-  fromRow =
-    Post
-      <$> field
-      <*> field
-      <*> field
-      <*> field
-
-withConn :: (Connection -> IO a) -> IO a
-withConn f = do
-  createDirectoryIfMissing True dbDir
+withConn :: FilePath -> (Connection -> IO a) -> IO a
+withConn dbPath f = do
+  createDirectoryIfMissing True (takeDirectory dbPath)
   conn <- open dbPath
   execute_
     conn
@@ -72,28 +66,28 @@ withConn f = do
   close conn
   pure r
 
-hashPassword :: Text -> IO (Maybe Text)
-hashPassword pw = do
+hashPassword :: Password -> IO (Maybe Text)
+hashPassword (Password pw) = do
   let raw = TE.encodeUtf8 pw
   m <- BC.hashPasswordUsingPolicy BC.slowerBcryptHashingPolicy raw
   pure (TE.decodeUtf8 <$> m)
 
-validatePassword :: Text -> Text -> Bool
-validatePassword hashed pw =
+validatePassword :: Text -> Password -> Bool
+validatePassword hashed (Password pw) =
   BC.validatePassword (TE.encodeUtf8 hashed) (TE.encodeUtf8 pw)
 
-findUser :: Connection -> Text -> Text -> IO (Maybe User)
+findUser :: Connection -> UserName -> Password -> IO (Maybe User)
 findUser conn nm pw = do
   rows <-
     query
       conn
       "SELECT name, password FROM users WHERE name = ?"
-      (Only nm) ::
+      (Only (unUserName nm)) ::
       IO [(Text, Text)]
   case rows of
     [(n, storedHash)] ->
       if validatePassword storedHash pw
-        then pure (Just (User n ""))
+        then pure (Just (User (UserName n) (Password "")))
         else pure Nothing
     _ -> pure Nothing
 
@@ -105,66 +99,53 @@ createUser conn u = do
       pure (Left "パスワードの保存に失敗しました。もう一度お試しください。")
     Just hp -> do
       r <-
-        ( try
-            ( execute
-                conn
-                "INSERT INTO users (name, password) VALUES (?, ?)"
-                (userName u, hp)
-            )
-          ) ::
-          IO (Either SomeException ())
-      case r of
-        Right _ ->
-          pure (Right ())
-        Left _ ->
-          pure (Left "そのユーザー名は既に使われています。別のユーザー名を指定してください。")
+        ( execute
+            conn
+            "INSERT INTO users (name, password) VALUES (?, ?)"
+            (unUserName (userName u), hp)
+          >> pure (Right ())
+        ) `catchAny` (\_ -> pure (Left "そのユーザー名は既に使われています。別のユーザー名を指定してください。"))
+      pure r
 
 listRecentPosts :: Connection -> IO [Post]
-listRecentPosts conn =
-  query_
-    conn
-    "SELECT id, author, body, created_at \
-    \FROM posts \
-    \ORDER BY id DESC \
-    \LIMIT 1000"
+listRecentPosts conn = do
+  rows <-
+    query_
+      conn
+      "SELECT id, author, body, created_at \
+      \FROM posts \
+      \ORDER BY id DESC \
+      \LIMIT 1000" ::
+      IO [(Int, Text, Text, Text)]
+  pure (mapMaybe rowToPost rows)
+  where
+    rowToPost :: (Int, Text, Text, Text) -> Maybe Post
+    rowToPost (i, authorTxt, bodyTxt, createdTxt) = do
+      body <- mkNonEmptyBody bodyTxt
+      created <- parseCreatedAtText createdTxt
+      let pid    = PostId i
+          author = UserName authorTxt
+      pure (Post pid author body created)
 
-addPost :: Connection -> Text -> Text -> IO ()
+addPost :: Connection -> UserName -> NonEmptyBody -> IO Post
 addPost conn author body = do
   now <- getCurrentTime
-  let ts =
-        T.pack
-          ( formatTime
-              defaultTimeLocale
-              "%Y-%m-%d %H:%M:%S"
-              now
-          )
+  let created = CreatedAt now
+      ts      = formatCreatedAtText created
   execute
     conn
     "INSERT INTO posts (author, body, created_at) VALUES (?, ?, ?)"
-    (author, body, ts)
-  counts <-
-    query_
-      conn
-      "SELECT COUNT(*) FROM posts" ::
-      IO [Only Int]
-  case counts of
-    [Only n] -> do
-      when (n > 1000) $ do
-        let over = n - 1000
-        execute
-          conn
-          "DELETE FROM posts \
-          \WHERE id IN (\
-          \  SELECT id FROM posts \
-          \  ORDER BY id ASC \
-          \  LIMIT ?\
-          \)"
-          (Only over)
-    _ -> pure ()
+    (unUserName author, unBody body, ts)
+  rowId <- lastInsertRowId conn
+  let pid = PostId (fromIntegral (rowId :: Int64))
+  pure (Post pid author body created)
 
-deletePost :: Connection -> Int -> IO ()
+deletePost :: Connection -> PostId -> IO ()
 deletePost conn pid =
   execute
     conn
     "DELETE FROM posts WHERE id = ?"
-    (Only pid)
+    (Only (unPostId pid))
+
+catchAny :: IO a -> (IOError -> IO a) -> IO a
+catchAny = catch

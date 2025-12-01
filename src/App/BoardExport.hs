@@ -2,21 +2,30 @@
 
 module App.BoardExport
   ( startBoardExporter
-  )
-where
+  ) where
 
-import App.DB
+import App.Board
+  ( boardAllDesc
+  )
+import App.Env
+  ( Env(..)
+  )
 import App.Types
-import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (forever, when)
-import Data.List (sortOn)
+  ( Post(..)
+  , UserName(..)
+  , NonEmptyBody(..)
+  , CreatedAt(..)
+  , formatCreatedAtText
+  )
+import Control.Concurrent (forkIO)
+import Control.Concurrent.STM
+  ( atomically
+  , readTChan
+  , readTVarIO
+  )
+import Control.Monad (forever)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Time
-  ( UTCTime
-  , defaultTimeLocale
-  , parseTimeM
-  )
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import System.Directory (createDirectoryIfMissing)
 import Text.Printf (printf)
@@ -30,48 +39,42 @@ datDir = boardDir ++ "/dat"
 boardTitle :: T.Text
 boardTitle = "mnist-web 掲示板"
 
-startBoardExporter :: IO ()
-startBoardExporter = do
-  _ <- forkIO loop
+startBoardExporter :: Env -> IO ()
+startBoardExporter env = do
+  _ <- forkIO (loop env)
   pure ()
-  where
-    loop = forever $ do
-      exportOnce
-      threadDelay (5 * 1000000)
 
-exportOnce :: IO ()
-exportOnce =
-  withConn $ \conn -> do
-    posts <- listRecentPosts conn
-    let psAsc = sortOn postId posts
-    when (not (null psAsc)) $ do
+loop :: Env -> IO ()
+loop env =
+  forever $ do
+    atomically (readTChan (envBoardChan env))
+    exportOnce env
+
+exportOnce :: Env -> IO ()
+exportOnce env = do
+  st <- readTVarIO (envBoardState env)
+  let psDesc = boardAllDesc st
+      psAsc  = reverse psDesc
+  case psAsc of
+    [] -> pure ()
+    _  -> do
       createDirectoryIfMissing True boardDir
       createDirectoryIfMissing True datDir
-      let key = threadKeyFromPosts psAsc
-      let datPath = datDir ++ "/" ++ key ++ ".dat"
-      let datTxt = buildDatText psAsc
+      let key     = threadKeyFromPosts psAsc
+          datPath = datDir ++ "/" ++ key ++ ".dat"
+          datTxt  = buildDatText psAsc
       TIO.writeFile datPath datTxt
       let subjPath = boardDir ++ "/subject.txt"
-      let subjLine = buildSubjectLine key boardTitle (length psAsc)
+          subjLine = buildSubjectLine key boardTitle (length psAsc)
       TIO.writeFile subjPath (subjLine <> T.pack "\n")
 
 threadKeyFromPosts :: [Post] -> String
 threadKeyFromPosts [] = "0000000000"
 threadKeyFromPosts (p : _) =
-  case parseCreatedAt (postCreatedAt p) of
-    Nothing  -> "0000000000"
-    Just t   ->
-      let sec :: Integer
-          sec = floor (utcTimeToPOSIXSeconds t)
-       in printf "%010d" sec
-
-parseCreatedAt :: T.Text -> Maybe UTCTime
-parseCreatedAt t =
-  parseTimeM
-    True
-    defaultTimeLocale
-    "%Y-%m-%d %H:%M:%S"
-    (T.unpack t)
+  let CreatedAt t = postCreatedAt p
+      sec :: Integer
+      sec = floor (utcTimeToPOSIXSeconds t)
+   in printf "%010d" sec
 
 buildDatText :: [Post] -> T.Text
 buildDatText posts =
@@ -80,14 +83,22 @@ buildDatText posts =
 
 buildDatLine :: Int -> Post -> T.Text
 buildDatLine idx p =
-  let nm  = escapeHtml (postAuthor p)
+  let UserName nmTxt     = postAuthor p
+      NonEmptyBody bdTxt = postBody p
+      createdTxt         = formatCreatedAtText (postCreatedAt p)
+      nm  = escapeHtml nmTxt
       em  = T.empty
-      dt  = postCreatedAt p
-      bd  = encodeBody (postBody p)
+      dt  = createdTxt
+      bd  = encodeBody bdTxt
       ttl = if idx == 0 then boardTitle else T.empty
    in T.intercalate
         (T.pack "<>")
-        [nm, em, dt, bd, ttl]
+        [ nm
+        , em
+        , dt
+        , bd
+        , ttl
+        ]
 
 encodeBody :: T.Text -> T.Text
 encodeBody t =
