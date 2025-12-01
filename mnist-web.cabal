@@ -1,0 +1,27 @@
+cabal-version:       >=1.10
+name:                mnist-web
+version:             0.1.0.0
+build-type:          Simple
+
+executable mnist-web
+  hs-source-dirs:      src
+  main-is:             Main.hs
+  other-modules:
+    App.Server
+    App.Types
+    App.Auth
+    App.Templates
+    App.DB
+  default-language:    Haskell2010
+  ghc-options:         -O2 -Wall
+
+  build-depends:
+      base       >=4.7 && <5
+    , warp
+    , wai
+    , http-types
+    , bytestring
+    , text
+    , blaze-html
+    , sqlite-simple
+    , directory
