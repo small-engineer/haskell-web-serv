@@ -11,6 +11,7 @@ module App.DB
 where
 
 import App.Types
+import Control.Exception (SomeException, try)
 import Control.Monad (when)
 import qualified Crypto.BCrypt as BC
 import Data.Text (Text)
@@ -96,17 +97,27 @@ findUser conn nm pw = do
         else pure Nothing
     _ -> pure Nothing
 
-createUser :: Connection -> User -> IO ()
+createUser :: Connection -> User -> IO (Either Text ())
 createUser conn u = do
   mHash <- hashPassword (userPass u)
   case mHash of
     Nothing ->
-      fail "password hashing failed"
-    Just hp ->
-      execute
-        conn
-        "INSERT INTO users (name, password) VALUES (?, ?)"
-        (userName u, hp)
+      pure (Left "パスワードの保存に失敗しました。もう一度お試しください。")
+    Just hp -> do
+      r <-
+        ( try
+            ( execute
+                conn
+                "INSERT INTO users (name, password) VALUES (?, ?)"
+                (userName u, hp)
+            )
+          ) ::
+          IO (Either SomeException ())
+      case r of
+        Right _ ->
+          pure (Right ())
+        Left _ ->
+          pure (Left "そのユーザー名は既に使われています。別のユーザー名を指定してください。")
 
 listRecentPosts :: Connection -> IO [Post]
 listRecentPosts conn =

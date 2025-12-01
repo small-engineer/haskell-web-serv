@@ -14,6 +14,7 @@ import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Network.HTTP.Types
   ( hCookie,
     hLocation,
@@ -55,6 +56,8 @@ app req respond = do
       handleLogout respond
     ("GET", ["health"]) ->
       respond healthResponse
+    ("GET", ["style.css"]) ->
+      serveCss respond
     _ ->
       respond notFoundResponse
 
@@ -66,8 +69,8 @@ handleLogin req respond = do
   let mPass = lookup "password" params
   case (mUser, mPass) of
     (Just u, Just p) -> do
-      let nameTxt = T.pack (B8.unpack u)
-      let passTxt = T.pack (B8.unpack p)
+      let nameTxt = TE.decodeUtf8 u
+      let passTxt = TE.decodeUtf8 p
       mFound <-
         withConn $ \conn ->
           findUser conn nameTxt passTxt
@@ -98,17 +101,25 @@ handleRegister req respond = do
   let mPass = lookup "password" params
   case (mUser, mPass) of
     (Just u, Just p) -> do
-      let nameTxt = T.pack (B8.unpack u)
-      let passTxt = T.pack (B8.unpack p)
+      let nameTxt = TE.decodeUtf8 u
+      let passTxt = TE.decodeUtf8 p
       let newUser = User nameTxt passTxt
-      _ <-
+      res <-
         withConn $ \conn ->
           createUser conn newUser
-      respond
-        ( htmlResponse
-            status200
-            (loginPage (Just "登録が完了しました。ログインしてください。"))
-        )
+      case res of
+        Left msg ->
+          respond
+            ( htmlResponse
+                status200
+                (registerPage (Just msg))
+            )
+        Right _ ->
+          respond
+            ( htmlResponse
+                status200
+                (loginPage (Just "登録が完了しました。ログインしてください。"))
+            )
     _ ->
       respond (htmlResponse status200 (registerPage (Just "ユーザー名とパスワードを入力してください。")))
 
@@ -152,7 +163,7 @@ handleCreatePost req respond = do
                 Nothing ->
                   redirectTo "/home" respond
                 Just b -> do
-                  let msgTxt = T.strip (T.pack (B8.unpack b))
+                  let msgTxt = T.strip (TE.decodeUtf8 b)
                   if T.null msgTxt
                     then redirectTo "/home" respond
                     else do
@@ -215,6 +226,16 @@ notFoundResponse =
     status404
     [("Content-Type", "text/plain; charset=utf-8")]
     "not found"
+
+serveCss :: (Response -> IO ResponseReceived) -> IO ResponseReceived
+serveCss respond = do
+  css <- BL.readFile "assets/style.css"
+  let resp =
+        responseLBS
+          status200
+          [("Content-Type", "text/css; charset=utf-8")]
+          css
+  respond resp
 
 redirectTo :: BS.ByteString -> (Response -> IO ResponseReceived) -> IO ResponseReceived
 redirectTo loc respond = do

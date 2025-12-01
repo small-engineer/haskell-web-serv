@@ -23,6 +23,9 @@ loginPage err =
     H.head $ do
       H.meta H.! A.charset "utf-8"
       H.title "Login"
+      H.link
+        H.! A.rel "stylesheet"
+        H.! A.href "/style.css"
     H.body $ do
       H.h1 "Login"
       case err of
@@ -60,6 +63,9 @@ registerPage err =
     H.head $ do
       H.meta H.! A.charset "utf-8"
       H.title "Register"
+      H.link
+        H.! A.rel "stylesheet"
+        H.! A.href "/style.css"
     H.body $ do
       H.h1 "Register"
       case err of
@@ -98,6 +104,9 @@ homePage u csrfTok posts =
     H.head $ do
       H.meta H.! A.charset "utf-8"
       H.title "Home"
+      H.link
+        H.! A.rel "stylesheet"
+        H.! A.href "/style.css"
     H.body $ do
       H.h1 "Home"
       H.p $ do

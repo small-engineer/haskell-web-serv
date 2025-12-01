@@ -1,51 +1,66 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.6.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = ">= 5.0"
     }
   }
 }
 
 provider "aws" {
-  region = var.aws_region
+  region = var.region
 }
 
-resource "aws_lightsail_instance" "haskell_web_serv" {
-  name              = "haskell-web-serv"
-  availability_zone = "${var.aws_region}a"
-  blueprint_id      = "ubuntu_22_04"
-  bundle_id         = "nano_3_0"
-  key_pair_name     = var.key_pair_name
+resource "aws_lightsail_container_service" "svc" {
+  name  = var.service_name
+  power = var.power
+  scale = var.scale
 
-  user_data = templatefile(
-    "${path.module}/user_data.sh",
-    {
-      app_repo_url = var.app_repo_url
-      jwt_secret   = var.jwt_secret
+  tags = {
+    Project = var.project
+    Env     = var.env
+  }
+}
+
+resource "aws_lightsail_container_service_deployment_version" "svc_deploy" {
+  service_name = aws_lightsail_container_service.svc.name
+
+  container {
+    container_name = "app"
+    image          = var.image
+
+    command = var.command
+
+    environment = merge(
+      var.environment,
+      length(var.jwt_secret) > 0 ? { JWT_SECRET = var.jwt_secret } : {}
+    )
+
+    ports = {
+      "${var.container_port}" = "HTTP"
     }
-  )
-}
-
-resource "aws_lightsail_instance_public_ports" "haskell_web_serv" {
-  instance_name = aws_lightsail_instance.haskell_web_serv.name
-
-  port_info {
-    from_port = 22
-    to_port   = 22
-    protocol  = "tcp"
   }
 
-  port_info {
-    from_port = 80
-    to_port   = 80
-    protocol  = "tcp"
+  public_endpoint {
+    container_name = "app"
+    container_port = var.container_port
+
+    health_check {
+      path                = var.health_check_path
+      interval_seconds    = 10
+      timeout_seconds     = 5
+      healthy_threshold   = 2
+      unhealthy_threshold = 2
+    }
   }
 }
 
-output "public_ip" {
-  value       = aws_lightsail_instance.haskell_web_serv.public_ip_address
-  description = "Public IP of haskell-web-serv Lightsail instance"
+output "lightsail_container_service_name" {
+  value = aws_lightsail_container_service.svc.name
+}
+
+output "lightsail_container_service_url" {
+  value = aws_lightsail_container_service.svc.url
 }

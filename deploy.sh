@@ -1,31 +1,78 @@
 #!/bin/sh
+
 set -eu
 
-APP_BASE=/opt/haskell-web-serv
-APP_DIR="$APP_BASE/repo"
-REPO_URL="https://github.com/small-engineer/haskell-web-serv.git"
-CNTR="haskell-web-serv"
+ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-mkdir -p "$APP_BASE"
+SERVICE_NAME="mnist-web-dev"
+AWS_REGION="ap-northeast-1"
+LOCAL_IMAGE_NAME="mnist-web-app"
+TF_VARS_FILE="main.tfvars"
+INFRA_DIR="${ROOT_DIR}/infra"
 
-if [ ! -d "$APP_DIR/.git" ]; then
-  rm -rf "$APP_DIR"
-  git clone "$REPO_URL" "$APP_DIR"
+echo "==> Terraform: Lightsail コンテナサービスの存在確認／作成"
+
+cd "${INFRA_DIR}"
+terraform init -input=false
+
+terraform apply \
+  -auto-approve \
+  -var-file="${TF_VARS_FILE}" \
+  -target="aws_lightsail_container_service.svc"
+
+cd "${ROOT_DIR}"
+
+echo "==> Docker image build"
+
+docker buildx build \
+  --platform linux/amd64 \
+  -t "${LOCAL_IMAGE_NAME}:latest" \
+  --load \
+  "${ROOT_DIR}"
+
+echo "==> JWT_SECRET 生成"
+
+if command -v openssl >/dev/null 2>&1; then
+  JWT_SECRET=$(openssl rand -hex 32)
+else
+  JWT_SECRET=$(hexdump -n 32 -v -e '/1 "%02x"' /dev/urandom)
 fi
 
-cd "$APP_DIR"
+echo "JWT_SECRET length: $(printf "%s" "${JWT_SECRET}" | wc -c | tr -d ' ')"
 
-git fetch origin
-git reset --hard origin/main
+echo "==> Docker image を Lightsail に push 中..."
 
-docker rm -f "$CNTR" 2>/dev/null || true
-docker rmi "$CNTR:latest" 2>/dev/null || true
+set +e
+aws lightsail push-container-image \
+  --region "${AWS_REGION}" \
+  --service-name "${SERVICE_NAME}" \
+  --label "${LOCAL_IMAGE_NAME}" \
+  --image "${LOCAL_IMAGE_NAME}:latest"
+PUSH_RC=$?
+set -e
 
-docker build -t "$CNTR:latest" .
+if [ "${PUSH_RC}" -ne 0 ]; then
+  echo "WARN: aws lightsail push-container-image Error" >&2
+fi
 
-docker run -d \
-  --name "$CNTR" \
-  --restart unless-stopped \
-  -p 80:8080 \
-  -e "JWT_SECRET=${JWT_SECRET:-changeme}" \
-  "$CNTR:latest"
+IMAGE_ID=$(
+  aws lightsail get-container-images \
+    --region "${AWS_REGION}" \
+    --service-name "${SERVICE_NAME}" \
+    --query 'containerImages[-1].image' \
+    --output text
+)
+
+echo "==> image id: ${IMAGE_ID}"
+
+cd "${INFRA_DIR}"
+
+echo "==> Terraform apply"
+
+terraform apply \
+  -auto-approve \
+  -var-file="${TF_VARS_FILE}" \
+  -var="image=${IMAGE_ID}" \
+  -var="jwt_secret=${JWT_SECRET}"
+
+echo "==> デプロイ完了"
