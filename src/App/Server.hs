@@ -96,14 +96,14 @@ data Route
   | RRegisterGet
   | RRegisterPost
   | RHomeGet
-  | RPostsUpdates
+  | RPostsUpdates (Maybe PostId)
   | RPostsCreate
   | RPostsDelete
   | RLogout
   | RHealth
   | RStyle
   | RApiPosts
-  | RApiPostsUpdates
+  | RApiPostsUpdates (Maybe PostId)
   | RNotFound
 
 data AuthResult = AuthResult
@@ -124,23 +124,23 @@ appHandler :: Request -> AppM Response
 appHandler req = do
   env <- ask
   case routeOf req of
-    RRoot            -> pure (redirectResponse "/login")
-    RLoginGet        ->
+    RRoot                    -> pure (redirectResponse "/login")
+    RLoginGet                ->
       pure (htmlResponse status200 (loginPage (envTemplates env) Nothing))
-    RLoginPost       -> handleLogin req
-    RRegisterGet     ->
+    RLoginPost               -> handleLogin req
+    RRegisterGet             ->
       pure (htmlResponse status200 (registerPage (envTemplates env) Nothing))
-    RRegisterPost    -> handleRegister req
-    RHomeGet         -> handleHome req
-    RPostsUpdates    -> handlePostsUpdates req
-    RPostsCreate     -> handleCreatePost req
-    RPostsDelete     -> handleDeletePost req
-    RLogout          -> pure handleLogout
-    RHealth          -> pure healthResponse
-    RStyle           -> handleCss
-    RApiPosts        -> handleApiPosts req
-    RApiPostsUpdates -> handleApiPostsUpdates req
-    RNotFound        -> pure notFoundResponse
+    RRegisterPost            -> handleRegister req
+    RHomeGet                 -> handleHome req
+    RPostsUpdates mPid       -> handlePostsUpdates req mPid
+    RPostsCreate             -> handleCreatePost req
+    RPostsDelete             -> handleDeletePost req
+    RLogout                  -> pure handleLogout
+    RHealth                  -> pure healthResponse
+    RStyle                   -> handleCss
+    RApiPosts                -> handleApiPosts req
+    RApiPostsUpdates mPid    -> handleApiPostsUpdates req mPid
+    RNotFound                -> pure notFoundResponse
 
 routeOf :: Request -> Route
 routeOf req =
@@ -151,14 +151,22 @@ routeOf req =
     ("GET", ["register"])                 -> RRegisterGet
     ("POST", ["register"])                -> RRegisterPost
     ("GET", ["home"])                     -> RHomeGet
-    ("GET", ["posts", "updates"])         -> RPostsUpdates
+    ("GET", ["posts", "updates"])         ->
+      let qs       = queryString req
+          mAfterBs = lookup "after" qs >>= id
+          mPid     = mAfterBs >>= readPostId
+       in RPostsUpdates mPid
     ("POST", ["posts"])                   -> RPostsCreate
     ("POST", ["posts", "delete"])         -> RPostsDelete
     ("GET", ["logout"])                   -> RLogout
     ("GET", ["health"])                   -> RHealth
     ("GET", ["style.css"])                -> RStyle
     ("GET", ["api", "posts"])             -> RApiPosts
-    ("GET", ["api", "posts", "updates"])  -> RApiPostsUpdates
+    ("GET", ["api", "posts", "updates"])  ->
+      let qs       = queryString req
+          mAfterBs = lookup "after" qs >>= id
+          mPid     = mAfterBs >>= readPostId
+       in RApiPostsUpdates mPid
     _                                     -> RNotFound
 
 handleLogin :: Request -> AppM Response
@@ -254,18 +262,15 @@ handleHome req = do
             (homePage (envTemplates env) au csrfTok posts)
         )
 
-handlePostsUpdates :: Request -> AppM Response
-handlePostsUpdates req = do
+handlePostsUpdates :: Request -> Maybe PostId -> AppM Response
+handlePostsUpdates req mPid = do
   r <- requireAuth req
   case r of
     Left _ -> pure (htmlResponse status200 T.empty)
     Right (AuthResult au tok) -> do
       env <- ask
       st  <- liftIO (readTVarIO (envBoardState env))
-      let qs       = queryString req
-          mAfterBs = lookup "after" qs >>= id
-          mPid     = mAfterBs >>= readPostId
-          newPosts =
+      let newPosts =
             case mPid of
               Nothing  -> []
               Just pid -> boardNewerThan pid st
@@ -336,7 +341,7 @@ handleDeletePost req = do
                         (envBoardState env)
                         (\st ->
                            let ps = boardAllDesc st
-                               ps' = filter (\p -> postId p /= pid) ps
+                               ps' = filter (\q -> postId q /= pid) ps
                            in fromPosts ps'
                         )
                   liftIO $
@@ -450,8 +455,8 @@ handleApiPosts req = do
       let ps = boardAllDesc st
       pure (jsonResponse HT.status200 (postsToJson ps))
 
-handleApiPostsUpdates :: Request -> AppM Response
-handleApiPostsUpdates req = do
+handleApiPostsUpdates :: Request -> Maybe PostId -> AppM Response
+handleApiPostsUpdates req mPid = do
   r <- requireAuth req
   case r of
     Left _ ->
@@ -459,10 +464,7 @@ handleApiPostsUpdates req = do
     Right _ -> do
       env <- ask
       st  <- liftIO (readTVarIO (envBoardState env))
-      let qs       = queryString req
-          mAfterBs = lookup "after" qs >>= id
-          mPid     = mAfterBs >>= readPostId
-          newPosts =
+      let newPosts =
             case mPid of
               Nothing  -> []
               Just pid -> boardNewerThan pid st

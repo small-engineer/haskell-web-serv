@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module App.DB
-  ( withConn
+  ( initDB
+  , withConn
   , findUser
   , createUser
   , listRecentPosts
@@ -20,6 +21,9 @@ import App.Types
   , formatCreatedAtText
   , mkNonEmptyBody
   , parseCreatedAtText
+  , unUserName
+  , unPostId
+  , unBody
   )
 import qualified Crypto.BCrypt as BC
 import Data.Int (Int64)
@@ -31,6 +35,8 @@ import Data.Time (getCurrentTime)
 import Database.SQLite.Simple
   ( Connection
   , Only(..)
+  , SQLError(..)
+  , Error(..)
   , close
   , execute
   , execute_
@@ -41,11 +47,10 @@ import Database.SQLite.Simple
   )
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch)
 
--- dbPath は Env から渡され、ここでのみ open/close される。
-withConn :: FilePath -> (Connection -> IO a) -> IO a
-withConn dbPath f = do
+initDB :: FilePath -> IO ()
+initDB dbPath = do
   createDirectoryIfMissing True (takeDirectory dbPath)
   conn <- open dbPath
   execute_
@@ -63,6 +68,12 @@ withConn dbPath f = do
     \body TEXT NOT NULL,\
     \created_at TEXT NOT NULL\
     \)"
+  close conn
+
+withConn :: FilePath -> (Connection -> IO a) -> IO a
+withConn dbPath f = do
+  createDirectoryIfMissing True (takeDirectory dbPath)
+  conn <- open dbPath
   r <- f conn
   close conn
   pure r
@@ -105,10 +116,18 @@ createUser conn u = do
             "INSERT INTO users (name, password) VALUES (?, ?)"
             (unUserName (userName u), hp)
           >> pure (Right ())
-        ) `catchAny` (\_ -> pure (Left "そのユーザー名は既に使われています。別のユーザー名を指定してください。"))
+        ) `catch` handler
       pure r
+  where
+    handler :: SQLError -> IO (Either Text ())
+    handler e =
+      case sqlError e of
+        ErrorConstraint ->
+          pure (Left "そのユーザー名は既に使われています。別のユーザー名を指定してください。")
+        _ -> do
+          putStrLn ("[ERROR] createUser failed: " ++ show e)
+          pure (Left "ユーザー登録に失敗しました。時間をおいて再度お試しください。")
 
--- rowToPost で mkNonEmptyBody / parseCreatedAtText を通し、Post は整合性保証済みの型として返す
 listRecentPosts :: Connection -> IO [Post]
 listRecentPosts conn = do
   rows <-
@@ -129,7 +148,6 @@ listRecentPosts conn = do
           author = UserName authorTxt
       pure (Post pid author body created)
 
--- 現在時刻を CreatedAt として保持し、Text への変換は formatCreatedAtText に集約している
 addPost :: Connection -> UserName -> NonEmptyBody -> IO Post
 addPost conn author body = do
   now <- getCurrentTime
@@ -149,6 +167,3 @@ deletePost conn pid =
     conn
     "DELETE FROM posts WHERE id = ?"
     (Only (unPostId pid))
-
-catchAny :: IO a -> (SomeException -> IO a) -> IO a
-catchAny = catch

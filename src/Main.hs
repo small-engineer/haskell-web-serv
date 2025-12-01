@@ -4,7 +4,7 @@ module Main where
 
 import App.Board (fromPosts)
 import App.BoardExport (startBoardExporter)
-import App.DB (withConn, listRecentPosts)
+import App.DB (initDB, withConn, listRecentPosts)
 import App.Env (Env(..))
 import App.Auth (loadJwtSecret)
 import App.Server (runServer)
@@ -17,6 +17,8 @@ main = do
   tpls   <- loadTemplates
 
   let dbPath = "db/mnist-web.db"
+
+  initDB dbPath
 
   posts <- withConn dbPath listRecentPosts
   let st0 = fromPosts posts
