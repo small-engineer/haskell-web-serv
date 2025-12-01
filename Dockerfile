@@ -20,8 +20,6 @@ WORKDIR /app
 
 COPY --from=build /app/bin/mnist-web /usr/local/bin/mnist-web
 
-ENV JWT_SECRET=""
-
 EXPOSE 8080
 
 CMD ["mnist-web"]

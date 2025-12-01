@@ -1,52 +1,31 @@
-#!/bin/bash
-set -eux
+#!/bin/sh
+set -eu
 
-APP_DIR=/opt/haskell-web-serv/repo
+APP_BASE=/opt/haskell-web-serv
+APP_DIR="$APP_BASE/repo"
+REPO_URL="https://github.com/small-engineer/haskell-web-serv.git"
+CNTR="haskell-web-serv"
 
-if [ ! -d "$APP_DIR" ]; then
-  echo "ERROR: $APP_DIR が存在しません" >&2
-  exit 1
+mkdir -p "$APP_BASE"
+
+if [ ! -d "$APP_DIR/.git" ]; then
+  rm -rf "$APP_DIR"
+  git clone "$REPO_URL" "$APP_DIR"
 fi
 
 cd "$APP_DIR"
 
-# 最新 main を取得
 git fetch origin
-git checkout main
 git reset --hard origin/main
 
-# Docker が無ければインストール（初回保険）
-if ! command -v docker >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
-  systemctl enable docker
-  systemctl start docker
-fi
+docker rm -f "$CNTR" 2>/dev/null || true
+docker rmi "$CNTR:latest" 2>/dev/null || true
 
-# JWT_SECRET をサーバー側の .env から読み込む
-ENV_FILE=/opt/haskell-web-serv/.env
+docker build -t "$CNTR:latest" .
 
-if [ -f "$ENV_FILE" ]; then
-  . "$ENV_FILE"
-fi
-
-if [ -z "${JWT_SECRET:-}" ]; then
-  echo "ERROR: JWT_SECRET が設定されていません (.env か環境変数で指定してください)" >&2
-  exit 1
-fi
-
-# イメージビルド
-docker build -t haskell-web-serv "$APP_DIR"
-
-# 既存コンテナ停止・削除
-if docker ps -a --format '{{.Names}}' | grep -q '^haskell-web-serv$'; then
-  docker rm -f haskell-web-serv || true
-fi
-
-# 再起動
 docker run -d \
-  --name haskell-web-serv \
+  --name "$CNTR" \
   --restart unless-stopped \
   -p 80:8080 \
-  -e JWT_SECRET="$JWT_SECRET" \
-  haskell-web-serv
+  -e "JWT_SECRET=${JWT_SECRET:-changeme}" \
+  "$CNTR:latest"
