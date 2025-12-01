@@ -23,6 +23,52 @@ jobs:
                   mkdir -p ~/.ssh
                   ssh-keyscan -H "${{ secrets.LIGHTSAIL_HOST }}" >> ~/.ssh/known_hosts
 
-            - name: Deploy via SSH
+            - name: Deploy to Lightsail via SSH
+              env:
+                  JWT_SECRET: ${{ secrets.JWT_SECRET }}
               run: |
-                  ssh "${{ secrets.LIGHTSAIL_USER }}"@"${{ secrets.LIGHTSAIL_HOST }}" 'sudo -i /opt/haskell-web-serv/repo/deploy.sh'
+                  ssh "${{ secrets.LIGHTSAIL_USER }}"@"${{ secrets.LIGHTSAIL_HOST }}" "sudo JWT_SECRET='$JWT_SECRET' bash -s" <<'EOF'
+                  set -eux
+
+                  APP_BASE=/opt/haskell-web-serv
+                  APP_DIR="$APP_BASE/repo"
+                  REPO_URL="https://github.com/small-engineer/haskell-web-serv.git"
+                  CONTAINER_NAME=haskell-web-serv
+
+                  mkdir -p "$APP_BASE"
+
+                  # 必要なパッケージと Docker / git
+                  if ! command -v docker >/dev/null 2>&1; then
+                    apt-get update
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io git
+                    systemctl enable docker
+                    systemctl start docker
+                  fi
+
+                  # 初回 clone or 2 回目以降は更新
+                  if [ ! -d "$APP_DIR/.git" ]; then
+                    rm -rf "$APP_DIR"
+                    git clone "$REPO_URL" "$APP_DIR"
+                  fi
+
+                  cd "$APP_DIR"
+
+                  git fetch origin
+                  git checkout main
+                  git reset --hard origin/main
+
+                  # Docker build
+                  docker build -t "$CONTAINER_NAME" .
+
+                  # 既存コンテナを殺して置き換え
+                  if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
+                    docker rm -f "$CONTAINER_NAME" || true
+                  fi
+
+                  docker run -d \
+                    --name "$CONTAINER_NAME" \
+                    --restart unless-stopped \
+                    -p 80:8080 \
+                    -e JWT_SECRET="$JWT_SECRET" \
+                    "$CONTAINER_NAME"
+                  EOF
