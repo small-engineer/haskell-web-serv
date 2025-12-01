@@ -91,8 +91,8 @@ registerPage err =
       H.p H.! A.style "margin-top: 1rem;" $ do
         H.a H.! A.href "/login" $ "ログイン画面へ戻る"
 
-homePage :: User -> Html
-homePage u =
+homePage :: User -> Text -> [Post] -> Html
+homePage u csrfTok posts =
   H.docTypeHtml $ do
     H.head $ do
       H.meta H.! A.charset "utf-8"
@@ -104,6 +104,30 @@ homePage u =
         H.strong (H.toHtml (userName u))
       H.p $ do
         H.a H.! A.href "/logout" $ "ログアウト"
+      H.hr
+      H.h2 "掲示板"
+      H.form
+        H.! A.method "post"
+        H.! A.action "/posts" $ do
+          H.input
+            H.! A.type_ "hidden"
+            H.! A.name "csrf"
+            H.! A.value (H.toValue csrfTok)
+          H.div $ do
+            H.label H.! A.for "body" $ "メッセージ"
+            H.br
+            H.textarea
+              H.! A.name "body"
+              H.! A.id "body"
+              H.! A.rows "3"
+              H.! A.cols "60" $
+              ""
+          H.div H.! A.style "margin-top: 0.5rem;" $ do
+            H.button
+              H.! A.type_ "submit" $
+              "投稿"
+      H.hr
+      H.ul $ mapM_ renderPost posts
 
 htmlResponse :: Status -> Html -> Response
 htmlResponse st html =
@@ -111,3 +135,14 @@ htmlResponse st html =
     st
     [("Content-Type", "text/html; charset=utf-8")]
     (R.renderHtml html)
+
+renderPost :: Post -> H.Html
+renderPost p =
+  H.li H.! A.style "margin-bottom: 0.5rem;" $ do
+    H.div $ do
+      H.strong (H.toHtml (postAuthor p))
+      H.toHtml (" さん " :: Text)
+      H.span H.! A.style "color: #888; font-size: 0.8rem; margin-left: 0.5rem;" $
+        H.toHtml (postCreatedAt p)
+    H.div $
+      H.toHtml (postBody p)

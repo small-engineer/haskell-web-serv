@@ -24,4 +24,7 @@ executable mnist-web
     , text
     , blaze-html
     , sqlite-simple
-    , directory
+    ,  directory
+    ,  jwt
+    ,  time
+    ,  bcrypt

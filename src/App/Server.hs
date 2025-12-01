@@ -46,6 +46,8 @@ app req respond = do
       handleRegister req respond
     ("GET", ["home"]) ->
       handleHome req respond
+    ("POST", ["posts"]) ->
+      handleCreatePost req respond
     ("GET", ["logout"]) ->
       handleLogout respond
     ("GET", ["health"]) ->
@@ -71,7 +73,12 @@ handleLogin req respond = do
           respond (htmlResponse status200 (loginPage (Just "ユーザー名かパスワードが違います。")))
         Just user -> do
           tok <- issueToken user
-          let setCookieVal = B8.concat ["token=", tok, "; HttpOnly; Path=/"]
+          let setCookieVal =
+                B8.concat
+                  [ "token=",
+                    tok,
+                    "; HttpOnly; Path=/; SameSite=Lax"
+                  ]
           let headers =
                 [ (hLocation, "/home"),
                   ("Set-Cookie", setCookieVal)
@@ -113,12 +120,49 @@ handleHome req respond = do
       case mUser of
         Nothing ->
           redirectTo "/login" respond
-        Just u ->
-          respond (htmlResponse status200 (homePage u))
+        Just u -> do
+          posts <-
+            withConn $ \conn ->
+              listRecentPosts conn
+          let csrfTok = T.pack (B8.unpack tok)
+          respond (htmlResponse status200 (homePage u csrfTok posts))
+
+handleCreatePost :: Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
+handleCreatePost req respond = do
+  mTok <- extractTokenFromCookie req
+  case mTok of
+    Nothing ->
+      redirectTo "/login" respond
+    Just tok -> do
+      mUser <- verifyToken tok
+      case mUser of
+        Nothing ->
+          redirectTo "/login" respond
+        Just u -> do
+          body <- strictRequestBody req
+          let params = HT.parseSimpleQuery (BL.toStrict body)
+          let mBody = lookup "body" params
+          let mCsrf = lookup "csrf" params
+          case mCsrf of
+            Just c | c == tok -> do
+              case mBody of
+                Nothing ->
+                  redirectTo "/home" respond
+                Just b -> do
+                  let msgTxt = T.strip (T.pack (B8.unpack b))
+                  if T.null msgTxt
+                    then redirectTo "/home" respond
+                    else do
+                      _ <-
+                        withConn $ \conn ->
+                          addPost conn (userName u) msgTxt
+                      redirectTo "/home" respond
+            _ ->
+              redirectTo "/home" respond
 
 handleLogout :: (Response -> IO ResponseReceived) -> IO ResponseReceived
 handleLogout respond = do
-  let expired = "token=; Max-Age=0; Path=/"
+  let expired = "token=; Max-Age=0; Path=/; SameSite=Lax"
   let headers =
         [ (hLocation, "/login"),
           ("Set-Cookie", expired)
@@ -149,9 +193,9 @@ extractTokenFromCookie req = do
   let hs = requestHeaders req
   let mCookie = lookup hCookie hs
   case mCookie of
-    Nothing -> return Nothing
+    Nothing -> pure Nothing
     Just raw ->
-      return (extractToken raw)
+      pure (extractToken raw)
 
 extractToken :: BS.ByteString -> Maybe Token
 extractToken raw =
