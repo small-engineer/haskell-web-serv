@@ -49,6 +49,7 @@ variable "health_check_path" {
 variable "image" {
   type        = string
   description = "Lightsail container image id (output of aws lightsail push-container-image)"
+  default     = ""
 }
 
 variable "command" {

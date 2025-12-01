@@ -34,3 +34,4 @@ executable mnist-web
     , bcrypt
     , stm
     , mtl
+    , aeson

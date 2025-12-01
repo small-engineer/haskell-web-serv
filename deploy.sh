@@ -43,14 +43,20 @@ echo "JWT_SECRET length: ${JWT_LEN}"
 
 echo "==> Docker image を Lightsail に push 中..."
 
-IMAGE_ID=$(
+PUSH_OUT=$(
   aws lightsail push-container-image \
     --region "${AWS_REGION}" \
     --service-name "${SERVICE_NAME}" \
     --label "${LOCAL_IMAGE_NAME}" \
-    --image "${LOCAL_IMAGE_NAME}:latest" \
-    --query 'image' \
-    --output text
+    --image "${LOCAL_IMAGE_NAME}:latest" 2>&1
+)
+
+# push のログをそのまま表示
+printf '%s\n' "${PUSH_OUT}"
+
+IMAGE_ID=$(
+  printf '%s\n' "${PUSH_OUT}" \
+    | awk -F'"' '/Refer to this image as / { print $2; exit }'
 )
 
 if [ -z "${IMAGE_ID}" ] || [ "${IMAGE_ID}" = "None" ]; then

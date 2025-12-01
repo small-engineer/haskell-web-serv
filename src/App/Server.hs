@@ -41,10 +41,13 @@ import App.Types
   , User(..)
   , UserName(..)
   , Password(..)
+  , Post(..)
   , PostId(..)
+  , NonEmptyBody(..)
   , postId
   , mkAuthUser
   , mkNonEmptyBody
+  , formatCreatedAtText
   )
 import Control.Concurrent.STM
   ( atomically
@@ -54,6 +57,12 @@ import Control.Concurrent.STM
   )
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask)
+import Data.Aeson
+  ( Value
+  , (.=)
+  , object
+  , encode
+  )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
@@ -93,6 +102,8 @@ data Route
   | RLogout
   | RHealth
   | RStyle
+  | RApiPosts
+  | RApiPostsUpdates
   | RNotFound
 
 data AuthResult = AuthResult
@@ -113,38 +124,42 @@ appHandler :: Request -> AppM Response
 appHandler req = do
   env <- ask
   case routeOf req of
-    RRoot          -> pure (redirectResponse "/login")
-    RLoginGet      ->
+    RRoot            -> pure (redirectResponse "/login")
+    RLoginGet        ->
       pure (htmlResponse status200 (loginPage (envTemplates env) Nothing))
-    RLoginPost     -> handleLogin req
-    RRegisterGet   ->
+    RLoginPost       -> handleLogin req
+    RRegisterGet     ->
       pure (htmlResponse status200 (registerPage (envTemplates env) Nothing))
-    RRegisterPost  -> handleRegister req
-    RHomeGet       -> handleHome req
-    RPostsUpdates  -> handlePostsUpdates req
-    RPostsCreate   -> handleCreatePost req
-    RPostsDelete   -> handleDeletePost req
-    RLogout        -> pure handleLogout
-    RHealth        -> pure healthResponse
-    RStyle         -> handleCss
-    RNotFound      -> pure notFoundResponse
+    RRegisterPost    -> handleRegister req
+    RHomeGet         -> handleHome req
+    RPostsUpdates    -> handlePostsUpdates req
+    RPostsCreate     -> handleCreatePost req
+    RPostsDelete     -> handleDeletePost req
+    RLogout          -> pure handleLogout
+    RHealth          -> pure healthResponse
+    RStyle           -> handleCss
+    RApiPosts        -> handleApiPosts req
+    RApiPostsUpdates -> handleApiPostsUpdates req
+    RNotFound        -> pure notFoundResponse
 
 routeOf :: Request -> Route
 routeOf req =
   case (requestMethod req, pathInfo req) of
-    ("GET", [])                   -> RRoot
-    ("GET", ["login"])            -> RLoginGet
-    ("POST", ["login"])           -> RLoginPost
-    ("GET", ["register"])         -> RRegisterGet
-    ("POST", ["register"])        -> RRegisterPost
-    ("GET", ["home"])             -> RHomeGet
-    ("GET", ["posts", "updates"]) -> RPostsUpdates
-    ("POST", ["posts"])           -> RPostsCreate
-    ("POST", ["posts", "delete"]) -> RPostsDelete
-    ("GET", ["logout"])           -> RLogout
-    ("GET", ["health"])           -> RHealth
-    ("GET", ["style.css"])        -> RStyle
-    _                             -> RNotFound
+    ("GET", [])                           -> RRoot
+    ("GET", ["login"])                    -> RLoginGet
+    ("POST", ["login"])                   -> RLoginPost
+    ("GET", ["register"])                 -> RRegisterGet
+    ("POST", ["register"])                -> RRegisterPost
+    ("GET", ["home"])                     -> RHomeGet
+    ("GET", ["posts", "updates"])         -> RPostsUpdates
+    ("POST", ["posts"])                   -> RPostsCreate
+    ("POST", ["posts", "delete"])         -> RPostsDelete
+    ("GET", ["logout"])                   -> RLogout
+    ("GET", ["health"])                   -> RHealth
+    ("GET", ["style.css"])                -> RStyle
+    ("GET", ["api", "posts"])             -> RApiPosts
+    ("GET", ["api", "posts", "updates"])  -> RApiPostsUpdates
+    _                                     -> RNotFound
 
 handleLogin :: Request -> AppM Response
 handleLogin req = do
@@ -398,3 +413,57 @@ readPostId bs =
   case reads (B8.unpack bs) of
     [(n, "")] -> Just (PostId n)
     _         -> Nothing
+
+postsToJson :: [Post] -> BL.ByteString
+postsToJson ps =
+  encode (map postToJson ps)
+
+postToJson :: Post -> Value
+postToJson (Post (PostId pid) (UserName nm) (NonEmptyBody body) created) =
+  object
+    [ "id" .= pid
+    , "author" .= nm
+    , "body" .= body
+    , "created_at" .= formatCreatedAtText created
+    ]
+
+jsonResponse :: HT.Status -> BL.ByteString -> Response
+jsonResponse st body =
+  responseLBS
+    st
+    [("Content-Type", "application/json; charset=utf-8")]
+    body
+
+jsonError :: HT.Status -> T.Text -> Response
+jsonError st msg =
+  jsonResponse st (encode (object ["error" .= msg]))
+
+handleApiPosts :: Request -> AppM Response
+handleApiPosts req = do
+  r <- requireAuth req
+  case r of
+    Left _ ->
+      pure (jsonError HT.status401 "unauthorized")
+    Right _ -> do
+      env <- ask
+      st  <- liftIO (readTVarIO (envBoardState env))
+      let ps = boardAllDesc st
+      pure (jsonResponse HT.status200 (postsToJson ps))
+
+handleApiPostsUpdates :: Request -> AppM Response
+handleApiPostsUpdates req = do
+  r <- requireAuth req
+  case r of
+    Left _ ->
+      pure (jsonError HT.status401 "unauthorized")
+    Right _ -> do
+      env <- ask
+      st  <- liftIO (readTVarIO (envBoardState env))
+      let qs       = queryString req
+          mAfterBs = lookup "after" qs >>= id
+          mPid     = mAfterBs >>= readPostId
+          newPosts =
+            case mPid of
+              Nothing  -> []
+              Just pid -> boardNewerThan pid st
+      pure (jsonResponse HT.status200 (postsToJson newPosts))
