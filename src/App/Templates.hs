@@ -94,6 +94,7 @@ registerPage err =
 homePage :: User -> Text -> [Post] -> Html
 homePage u csrfTok posts =
   H.docTypeHtml $ do
+    let isAdminUser = userName u == "Admin"
     H.head $ do
       H.meta H.! A.charset "utf-8"
       H.title "Home"
@@ -127,7 +128,7 @@ homePage u csrfTok posts =
               H.! A.type_ "submit" $
               "投稿"
       H.hr
-      H.ul $ mapM_ renderPost posts
+      H.ul $ mapM_ (renderPost isAdminUser csrfTok) posts
 
 htmlResponse :: Status -> Html -> Response
 htmlResponse st html =
@@ -136,8 +137,8 @@ htmlResponse st html =
     [("Content-Type", "text/html; charset=utf-8")]
     (R.renderHtml html)
 
-renderPost :: Post -> H.Html
-renderPost p =
+renderPost :: Bool -> Text -> Post -> H.Html
+renderPost isAdminUser csrfTok p =
   H.li H.! A.style "margin-bottom: 0.5rem;" $ do
     H.div $ do
       H.strong (H.toHtml (postAuthor p))
@@ -146,3 +147,22 @@ renderPost p =
         H.toHtml (postCreatedAt p)
     H.div $
       H.toHtml (postBody p)
+    if isAdminUser
+      then do
+        H.form
+          H.! A.method "post"
+          H.! A.action "/posts/delete"
+          H.! A.style "margin-top: 0.25rem;" $ do
+            H.input
+              H.! A.type_ "hidden"
+              H.! A.name "csrf"
+              H.! A.value (H.toValue csrfTok)
+            H.input
+              H.! A.type_ "hidden"
+              H.! A.name "id"
+              H.! A.value (H.toValue (show (postId p)))
+            H.button
+              H.! A.type_ "submit"
+              H.! A.style "font-size: 0.8rem; color: #c00;" $
+              "削除"
+      else pure ()

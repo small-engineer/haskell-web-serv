@@ -6,6 +6,7 @@ module App.DB
     createUser,
     listRecentPosts,
     addPost,
+    deletePost,
   )
 where
 
@@ -149,3 +150,10 @@ addPost conn author body = do
           \)"
           (Only over)
     _ -> pure ()
+
+deletePost :: Connection -> Int -> IO ()
+deletePost conn pid =
+  execute
+    conn
+    "DELETE FROM posts WHERE id = ?"
+    (Only pid)

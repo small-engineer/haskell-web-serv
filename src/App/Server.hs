@@ -25,6 +25,7 @@ import qualified Network.HTTP.Types as HT
 import Network.Wai
 import Network.Wai.Handler.Warp
 import Network.Wai.Internal (ResponseReceived)
+import Text.Read (reads)
 
 runServer :: Int -> IO ()
 runServer p = run p app
@@ -48,6 +49,8 @@ app req respond = do
       handleHome req respond
     ("POST", ["posts"]) ->
       handleCreatePost req respond
+    ("POST", ["posts", "delete"]) ->
+      handleDeletePost req respond
     ("GET", ["logout"]) ->
       handleLogout respond
     ("GET", ["health"]) ->
@@ -160,6 +163,36 @@ handleCreatePost req respond = do
             _ ->
               redirectTo "/home" respond
 
+handleDeletePost :: Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
+handleDeletePost req respond = do
+  mTok <- extractTokenFromCookie req
+  case mTok of
+    Nothing ->
+      redirectTo "/login" respond
+    Just tok -> do
+      mUser <- verifyToken tok
+      case mUser of
+        Nothing ->
+          redirectTo "/login" respond
+        Just u ->
+          if userName u /= "Admin"
+            then redirectTo "/home" respond
+            else do
+              body <- strictRequestBody req
+              let params = HT.parseSimpleQuery (BL.toStrict body)
+              let mCsrf = lookup "csrf" params
+              let mIdBs = lookup "id" params
+              case (mCsrf, mIdBs) of
+                (Just c, Just idBs)
+                  | c == tok
+                  , Just pid <- readInt idBs -> do
+                      _ <-
+                        withConn $ \conn ->
+                          deletePost conn pid
+                      redirectTo "/home" respond
+                _ ->
+                  redirectTo "/home" respond
+
 handleLogout :: (Response -> IO ResponseReceived) -> IO ResponseReceived
 handleLogout respond = do
   let expired = "token=; Max-Age=0; Path=/; SameSite=Lax"
@@ -205,3 +238,9 @@ extractToken raw =
    in case mPart of
         Nothing -> Nothing
         Just p -> Just (B8.drop (B8.length (B8.pack "token=")) p)
+
+readInt :: B8.ByteString -> Maybe Int
+readInt bs =
+  case reads (B8.unpack bs) of
+    [(n, "")] -> Just n
+    _         -> Nothing
