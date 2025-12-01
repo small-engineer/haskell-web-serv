@@ -15,8 +15,9 @@ executable mnist-web
       App.Board
       App.BoardExport
       App.Env
+      App.TemplateFiles
   default-language:    Haskell2010
-  ghc-options:         -O2 -Wall
+  ghc-options:         -O2 -Wall -threaded
 
   build-depends:
       base       >=4.7 && <5
@@ -25,7 +26,6 @@ executable mnist-web
     , http-types
     , bytestring
     , text
-    , blaze-html
     , sqlite-simple
     , directory
     , filepath

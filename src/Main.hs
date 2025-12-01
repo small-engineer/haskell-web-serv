@@ -8,11 +8,14 @@ import App.DB (withConn, listRecentPosts)
 import App.Env (Env(..))
 import App.Auth (loadJwtSecret)
 import App.Server (runServer)
+import App.TemplateFiles (loadTemplates)
 import Control.Concurrent.STM (newTChanIO, newTVarIO)
 
 main :: IO ()
 main = do
   secret <- loadJwtSecret
+  tpls   <- loadTemplates
+
   let dbPath = "db/mnist-web.db"
 
   posts <- withConn dbPath listRecentPosts
@@ -27,6 +30,7 @@ main = do
           , envJwtSecret  = secret
           , envBoardState = stVar
           , envBoardChan  = ch
+          , envTemplates  = tpls
           }
       port = 8080
 

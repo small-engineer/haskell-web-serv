@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Home</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="text/javascript">
+      {
+        {
+          AUTO_RELOAD_JS;
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Home</h1>
+    <p>
+      ログイン中のユーザー:
+      <strong>{{USERNAME}}</strong>
+    </p>
+    <p>
+      <a href="/logout">ログアウト</a>
+    </p>
+    <hr />
+    <h2>掲示板</h2>
+    <form method="post" action="/posts">
+      <input type="hidden" name="csrf" value="{{CSRF}}" />
+      <div>
+        <label for="body">メッセージ</label><br />
+        <textarea id="body" name="body" rows="3" cols="60"></textarea>
+      </div>
+      <div style="margin-top: 0.5rem">
+        <button type="submit">投稿</button>
+      </div>
+    </form>
+    <hr />
+    <ul id="posts">
+      {{POSTS}}
+    </ul>
+  </body>
+</html>

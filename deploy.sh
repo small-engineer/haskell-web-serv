@@ -43,24 +43,18 @@ echo "JWT_SECRET length: ${JWT_LEN}"
 
 echo "==> Docker image を Lightsail に push 中..."
 
-aws lightsail push-container-image \
-  --region "${AWS_REGION}" \
-  --service-name "${SERVICE_NAME}" \
-  --label "${LOCAL_IMAGE_NAME}" \
-  --image "${LOCAL_IMAGE_NAME}:latest"
-
-echo "==> 最新イメージ ID を取得中..."
-
 IMAGE_ID=$(
-  aws lightsail get-container-images \
+  aws lightsail push-container-image \
     --region "${AWS_REGION}" \
     --service-name "${SERVICE_NAME}" \
-    --query 'containerImages[-1].image' \
+    --label "${LOCAL_IMAGE_NAME}" \
+    --image "${LOCAL_IMAGE_NAME}:latest" \
+    --query 'image' \
     --output text
 )
 
 if [ -z "${IMAGE_ID}" ] || [ "${IMAGE_ID}" = "None" ]; then
-  echo "ERROR: 取得できるコンテナイメージがありません" >&2
+  echo "ERROR: push-container-image から image ID を取得できませんでした" >&2
   exit 1
 fi
 

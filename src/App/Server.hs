@@ -110,12 +110,15 @@ app env req respond = do
   respond resp
 
 appHandler :: Request -> AppM Response
-appHandler req =
+appHandler req = do
+  env <- ask
   case routeOf req of
     RRoot          -> pure (redirectResponse "/login")
-    RLoginGet      -> pure (htmlResponse status200 (loginPage Nothing))
+    RLoginGet      ->
+      pure (htmlResponse status200 (loginPage (envTemplates env) Nothing))
     RLoginPost     -> handleLogin req
-    RRegisterGet   -> pure (htmlResponse status200 (registerPage Nothing))
+    RRegisterGet   ->
+      pure (htmlResponse status200 (registerPage (envTemplates env) Nothing))
     RRegisterPost  -> handleRegister req
     RHomeGet       -> handleHome req
     RPostsUpdates  -> handlePostsUpdates req
@@ -147,20 +150,24 @@ handleLogin :: Request -> AppM Response
 handleLogin req = do
   body <- liftIO (strictRequestBody req)
   let params = HT.parseSimpleQuery (BL.toStrict body)
+  env <- ask
   case (lookup "username" params, lookup "password" params) of
     (Just u, Just p) -> do
       let nameTxt = TE.decodeUtf8 u
           passTxt = TE.decodeUtf8 p
           nm      = UserName nameTxt
           pw      = Password passTxt
-      env <- ask
       mFound <-
         liftIO $
           withConn (envDbPath env) $ \conn ->
             findUser conn nm pw
       case mFound of
         Nothing ->
-          pure (htmlResponse status200 (loginPage (Just "ユーザー名かパスワードが違います。")))
+          pure
+            ( htmlResponse
+                status200
+                (loginPage (envTemplates env) (Just "ユーザー名かパスワードが違います。"))
+            )
         Just user -> do
           let au = mkAuthUser (userName user)
           tok <- issueToken au
@@ -176,29 +183,45 @@ handleLogin req = do
                 ]
           pure (responseLBS status302 headers "")
     _ ->
-      pure (htmlResponse status200 (loginPage (Just "ユーザー名とパスワードを入力してください。")))
+      pure
+        ( htmlResponse
+            status200
+            (loginPage (envTemplates env) (Just "ユーザー名とパスワードを入力してください。"))
+        )
 
 handleRegister :: Request -> AppM Response
 handleRegister req = do
   body <- liftIO (strictRequestBody req)
   let params = HT.parseSimpleQuery (BL.toStrict body)
+  env <- ask
   case (lookup "username" params, lookup "password" params) of
     (Just u, Just p) -> do
       let nameTxt = TE.decodeUtf8 u
           passTxt = TE.decodeUtf8 p
           newUser = User (UserName nameTxt) (Password passTxt)
-      env <- ask
       res <-
         liftIO $
           withConn (envDbPath env) $ \conn ->
             createUser conn newUser
       case res of
         Left msg ->
-          pure (htmlResponse status200 (registerPage (Just msg)))
+          pure
+            ( htmlResponse
+                status200
+                (registerPage (envTemplates env) (Just msg))
+            )
         Right _ ->
-          pure (htmlResponse status200 (loginPage (Just "登録が完了しました。ログインしてください。")))
+          pure
+            ( htmlResponse
+                status200
+                (loginPage (envTemplates env) (Just "登録が完了しました。ログインしてください。"))
+            )
     _ ->
-      pure (htmlResponse status200 (registerPage (Just "ユーザー名とパスワードを入力してください。")))
+      pure
+        ( htmlResponse
+            status200
+            (registerPage (envTemplates env) (Just "ユーザー名とパスワードを入力してください。"))
+        )
 
 handleHome :: Request -> AppM Response
 handleHome req = do
@@ -210,13 +233,17 @@ handleHome req = do
       st  <- liftIO (readTVarIO (envBoardState env))
       let csrfTok = TE.decodeUtf8 tok
           posts   = boardAllDesc st
-      pure (htmlResponse status200 (homePage au csrfTok posts))
+      pure
+        ( htmlResponse
+            status200
+            (homePage (envTemplates env) au csrfTok posts)
+        )
 
 handlePostsUpdates :: Request -> AppM Response
 handlePostsUpdates req = do
   r <- requireAuth req
   case r of
-    Left _ -> pure (htmlResponse status200 mempty)
+    Left _ -> pure (htmlResponse status200 T.empty)
     Right (AuthResult au tok) -> do
       env <- ask
       st  <- liftIO (readTVarIO (envBoardState env))
@@ -229,7 +256,11 @@ handlePostsUpdates req = do
               Just pid -> boardNewerThan pid st
           csrfTok  = TE.decodeUtf8 tok
           isAdmin  = authIsAdmin au
-      pure (htmlResponse status200 (postsFragment isAdmin csrfTok newPosts))
+      pure
+        ( htmlResponse
+            status200
+            (postsFragment (envTemplates env) isAdmin csrfTok newPosts)
+        )
 
 handleCreatePost :: Request -> AppM Response
 handleCreatePost req = do

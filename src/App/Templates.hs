@@ -8,6 +8,9 @@ module App.Templates
   , postsFragment
   ) where
 
+import App.TemplateFiles
+  ( Templates(..)
+  )
 import App.Types
   ( AuthUser(..)
   , UserName(..)
@@ -16,190 +19,116 @@ import App.Types
   , NonEmptyBody(..)
   , formatCreatedAtText
   )
+import Data.List (foldl')
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString.Lazy as BL
 import Network.HTTP.Types (Status)
 import Network.Wai (Response, responseLBS)
-import Text.Blaze.Html (Html)
-import qualified Text.Blaze.Html.Renderer.Utf8 as R
-import qualified Text.Blaze.Html5 as H
-import qualified Text.Blaze.Html5.Attributes as A
 
-loginPage :: Maybe Text -> Html
-loginPage err =
-  H.docTypeHtml $ do
-    H.head $ do
-      H.meta H.! A.charset "utf-8"
-      H.title "Login"
-      H.link
-        H.! A.rel "stylesheet"
-        H.! A.href "/style.css"
-    H.body $ do
-      H.h1 "Login"
-      case err of
-        Nothing ->
-          H.span H.! A.style "color: #666;" $
-            "ユーザー名とパスワードを入力してください。"
-        Just msg ->
-          H.div H.! A.style "color: red; margin-bottom: 1rem;" $
-            H.toHtml msg
-      H.form
-        H.! A.method "post"
-        H.! A.action "/login" $ do
-          H.div $ do
-            H.label H.! A.for "username" $ "ユーザー名"
-            H.input
-              H.! A.type_ "text"
-              H.! A.name "username"
-              H.! A.id "username"
-          H.div $ do
-            H.label H.! A.for "password" $ "パスワード"
-            H.input
-              H.! A.type_ "password"
-              H.! A.name "password"
-              H.! A.id "password"
-          H.div H.! A.style "margin-top: 1rem;" $ do
-            H.button
-              H.! A.type_ "submit" $
-              "ログイン"
-      H.p H.! A.style "margin-top: 1rem;" $ do
-        H.a H.! A.href "/register" $ "ユーザー登録はこちら"
-
-registerPage :: Maybe Text -> Html
-registerPage err =
-  H.docTypeHtml $ do
-    H.head $ do
-      H.meta H.! A.charset "utf-8"
-      H.title "Register"
-      H.link
-        H.! A.rel "stylesheet"
-        H.! A.href "/style.css"
-    H.body $ do
-      H.h1 "Register"
-      case err of
-        Nothing ->
-          H.span H.! A.style "color: #666;" $
-            "新しいユーザー名とパスワードを入力してください。"
-        Just msg ->
-          H.div H.! A.style "color: red; margin-bottom: 1rem;" $
-            H.toHtml msg
-      H.form
-        H.! A.method "post"
-        H.! A.action "/register" $ do
-          H.div $ do
-            H.label H.! A.for "username" $ "ユーザー名"
-            H.input
-              H.! A.type_ "text"
-              H.! A.name "username"
-              H.! A.id "username"
-          H.div $ do
-            H.label H.! A.for "password" $ "パスワード"
-            H.input
-              H.! A.type_ "password"
-              H.! A.name "password"
-              H.! A.id "password"
-          H.div H.! A.style "margin-top: 1rem;" $ do
-            H.button
-              H.! A.type_ "submit" $
-              "登録"
-      H.p H.! A.style "margin-top: 1rem;" $ do
-        H.a H.! A.href "/login" $ "ログイン画面へ戻る"
-
-homePage :: AuthUser -> Text -> [Post] -> Html
-homePage u csrfTok posts =
-  H.docTypeHtml $ do
-    let isAdminUser = authIsAdmin u
-    H.head $ do
-      H.meta H.! A.charset "utf-8"
-      H.title "Home"
-      H.link
-        H.! A.rel "stylesheet"
-        H.! A.href "/style.css"
-      H.script
-        H.! A.type_ "text/javascript" $
-        H.toHtml (autoReloadJs :: Text)
-    H.body $ do
-      H.h1 "Home"
-      H.p $ do
-        H.toHtml ("ログイン中のユーザー: " :: Text)
-        let UserName nm = authUserName u
-        H.strong (H.toHtml nm)
-      H.p $ do
-        H.a H.! A.href "/logout" $ "ログアウト"
-      H.hr
-      H.h2 "掲示板"
-      H.form
-        H.! A.method "post"
-        H.! A.action "/posts" $ do
-          H.input
-            H.! A.type_ "hidden"
-            H.! A.name "csrf"
-            H.! A.value (H.toValue csrfTok)
-          H.div $ do
-            H.label H.! A.for "body" $ "メッセージ"
-            H.br
-            H.textarea
-              H.! A.name "body"
-              H.! A.id "body"
-              H.! A.rows "3"
-              H.! A.cols "60" $
-              ""
-          H.div H.! A.style "margin-top: 0.5rem;" $ do
-            H.button
-              H.! A.type_ "submit" $
-              "投稿"
-      H.hr
-      H.ul
-        H.! A.id "posts" $
-        mapM_ (renderPost isAdminUser csrfTok) posts
-
-htmlResponse :: Status -> Html -> Response
-htmlResponse st html =
+htmlResponse :: Status -> Text -> Response
+htmlResponse st txt =
   responseLBS
     st
     [("Content-Type", "text/html; charset=utf-8")]
-    (R.renderHtml html)
+    (BL.fromStrict (TE.encodeUtf8 txt))
 
-postsFragment :: Bool -> Text -> [Post] -> Html
-postsFragment isAdminUser csrfTok ps =
-  mapM_ (renderPost isAdminUser csrfTok) ps
+loginPage :: Templates -> Maybe Text -> Text
+loginPage tpls mErr =
+  let base = tplLogin tpls
+      msg =
+        case mErr of
+          Nothing ->
+            "<span style=\"color: #666;\">ユーザー名とパスワードを入力してください。</span>"
+          Just e  ->
+            T.concat
+              [ "<div style=\"color: red; margin-bottom: 1rem;\">"
+              , escapeHtml e
+              , "</div>"
+              ]
+   in sub [("ERROR_BLOCK", msg)] base
 
-renderPost :: Bool -> Text -> Post -> H.Html
-renderPost isAdminUser csrfTok p =
+registerPage :: Templates -> Maybe Text -> Text
+registerPage tpls mErr =
+  let base = tplRegister tpls
+      msg =
+        case mErr of
+          Nothing ->
+            "<span style=\"color: #666;\">新しいユーザー名とパスワードを入力してください。</span>"
+          Just e  ->
+            T.concat
+              [ "<div style=\"color: red; margin-bottom: 1rem;\">"
+              , escapeHtml e
+              , "</div>"
+              ]
+   in sub [("ERROR_BLOCK", msg)] base
+
+homePage :: Templates -> AuthUser -> Text -> [Post] -> Text
+homePage tpls u csrfTok posts =
+  let base      = tplHome tpls
+      UserName nm = authUserName u
+      postsHtml = postsFragment tpls (authIsAdmin u) csrfTok posts
+   in sub
+        [ ("USERNAME", escapeHtml nm)
+        , ("CSRF", escapeHtml csrfTok)
+        , ("POSTS", postsHtml)
+        , ("AUTO_RELOAD_JS", autoReloadJs)
+        ]
+        base
+
+postsFragment :: Templates -> Bool -> Text -> [Post] -> Text
+postsFragment tpls isAdmin csrfTok ps =
+  T.concat (map (renderPostItem tpls isAdmin csrfTok) ps)
+
+renderPostItem :: Templates -> Bool -> Text -> Post -> Text
+renderPostItem tpls isAdmin csrfTok p =
   let PostId pid           = postId p
       UserName authorTxt   = postAuthor p
       NonEmptyBody bodyTxt = postBody p
       createdTxt           = formatCreatedAtText (postCreatedAt p)
-   in H.li
-        H.! A.style "margin-bottom: 0.5rem;"
-        H.! H.dataAttribute "id" (H.toValue pid) $ do
-             H.div $ do
-               H.strong (H.toHtml authorTxt)
-               H.toHtml (" さん " :: Text)
-               H.span
-                 H.! A.style "color: #888; font-size: 0.8rem; margin-left: 0.5rem;" $
-                 H.toHtml createdTxt
-             H.div $
-               H.toHtml bodyTxt
-             if isAdminUser
-               then do
-                 H.form
-                   H.! A.method "post"
-                   H.! A.action "/posts/delete"
-                   H.! A.style "margin-top: 0.25rem;" $ do
-                     H.input
-                       H.! A.type_ "hidden"
-                       H.! A.name "csrf"
-                       H.! A.value (H.toValue csrfTok)
-                     H.input
-                       H.! A.type_ "hidden"
-                       H.! A.name "id"
-                       H.! A.value (H.toValue pid)
-                     H.button
-                       H.! A.type_ "submit"
-                       H.! A.style "font-size: 0.8rem; color: #c00;" $
-                       "削除"
-               else pure ()
+      base                 = tplPostItem tpls
+      idTxt                = T.pack (show pid)
+      delHtml =
+        if isAdmin
+          then
+            T.concat
+              [ "<form method=\"post\" action=\"/posts/delete\" style=\"margin-top: 0.25rem;\">"
+              , "<input type=\"hidden\" name=\"csrf\" value=\""
+              , escapeHtml csrfTok
+              , "\">"
+              , "<input type=\"hidden\" name=\"id\" value=\""
+              , escapeHtml idTxt
+              , "\">"
+              , "<button type=\"submit\" style=\"font-size: 0.8rem; color: #c00;\">削除</button>"
+              , "</form>"
+              ]
+          else T.empty
+   in sub
+        [ ("ID", idTxt)
+        , ("AUTHOR", escapeHtml authorTxt)
+        , ("BODY", escapeHtml bodyTxt)
+        , ("CREATED", escapeHtml createdTxt)
+        , ("ADMIN_DELETE", delHtml)
+        ]
+        base
+
+sub :: [(Text, Text)] -> Text -> Text
+sub kvs t0 =
+  foldl'
+    (\t (k, v) -> T.replace ("{{" <> k <> "}}") v t)
+    t0
+    kvs
+
+escapeHtml :: Text -> Text
+escapeHtml =
+  T.concatMap repl
+  where
+    repl '<'  = "&lt;"
+    repl '>'  = "&gt;"
+    repl '&'  = "&amp;"
+    repl '"'  = "&quot;"
+    repl c    = T.singleton c
 
 autoReloadJs :: Text
 autoReloadJs =

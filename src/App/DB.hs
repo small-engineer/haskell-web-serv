@@ -41,7 +41,7 @@ import Database.SQLite.Simple
   )
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
-import Control.Exception (catch)
+import Control.Exception (catch, SomeException)
 
 withConn :: FilePath -> (Connection -> IO a) -> IO a
 withConn dbPath f = do
@@ -147,5 +147,5 @@ deletePost conn pid =
     "DELETE FROM posts WHERE id = ?"
     (Only (unPostId pid))
 
-catchAny :: IO a -> (IOError -> IO a) -> IO a
+catchAny :: IO a -> (SomeException -> IO a) -> IO a
 catchAny = catch

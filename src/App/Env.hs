@@ -8,6 +8,7 @@ module App.Env
   ) where
 
 import App.Board (BoardState)
+import App.TemplateFiles (Templates)
 import Control.Concurrent.STM (TVar, TChan)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ReaderT, MonadReader, runReaderT)
@@ -18,6 +19,7 @@ data Env = Env
   , envJwtSecret  :: Text
   , envBoardState :: TVar BoardState
   , envBoardChan  :: TChan ()
+  , envTemplates  :: Templates
   }
 
 newtype AppM a = AppM { unAppM :: ReaderT Env IO a }
