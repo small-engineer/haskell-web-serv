@@ -47,6 +47,7 @@ loadJwtSecret = do
             then fail "JWT_SECRET is too short; use at least 16 characters"
             else pure t
 
+-- Env 内の秘密鍵を使い、AppM の中で時刻を取得している。
 issueToken :: AuthUser -> AppM Token
 issueToken au = do
   env <- ask
@@ -82,6 +83,7 @@ issueToken au = do
 
   pure (TE.encodeUtf8 jwtTxt)
 
+-- iss/exp/subをチェックしAuthUserまで復元
 verifyToken :: Token -> AppM (Maybe AuthUser)
 verifyToken tok = do
   env <- ask

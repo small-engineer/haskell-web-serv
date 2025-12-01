@@ -43,6 +43,7 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 import Control.Exception (catch, SomeException)
 
+-- dbPath は Env から渡され、ここでのみ open/close される。
 withConn :: FilePath -> (Connection -> IO a) -> IO a
 withConn dbPath f = do
   createDirectoryIfMissing True (takeDirectory dbPath)
@@ -107,6 +108,7 @@ createUser conn u = do
         ) `catchAny` (\_ -> pure (Left "そのユーザー名は既に使われています。別のユーザー名を指定してください。"))
       pure r
 
+-- rowToPost で mkNonEmptyBody / parseCreatedAtText を通し、Post は整合性保証済みの型として返す
 listRecentPosts :: Connection -> IO [Post]
 listRecentPosts conn = do
   rows <-
@@ -127,6 +129,7 @@ listRecentPosts conn = do
           author = UserName authorTxt
       pure (Post pid author body created)
 
+-- 現在時刻を CreatedAt として保持し、Text への変換は formatCreatedAtText に集約している
 addPost :: Connection -> UserName -> NonEmptyBody -> IO Post
 addPost conn author body = do
   now <- getCurrentTime

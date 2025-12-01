@@ -27,6 +27,7 @@ import qualified Data.ByteString.Lazy as BL
 import Network.HTTP.Types (Status)
 import Network.Wai (Response, responseLBS)
 
+-- Blazeを使わずTextベースにすることでテンプレートのキャッシュと置換処理を純粋関数に
 htmlResponse :: Status -> Text -> Response
 htmlResponse st txt =
   responseLBS
@@ -77,6 +78,7 @@ homePage tpls u csrfTok posts =
         ]
         base
 
+-- BoardState から取り出した [Post] を直に描画
 postsFragment :: Templates -> Bool -> Text -> [Post] -> Text
 postsFragment tpls isAdmin csrfTok ps =
   T.concat (map (renderPostItem tpls isAdmin csrfTok) ps)
@@ -113,6 +115,7 @@ renderPostItem tpls isAdmin csrfTok p =
         ]
         base
 
+-- 簡易テンプレートエンジン。
 sub :: [(Text, Text)] -> Text -> Text
 sub kvs t0 =
   foldl'
@@ -130,6 +133,7 @@ escapeHtml =
     repl '"'  = "&quot;"
     repl c    = T.singleton c
 
+-- サーバ側の boardNewerThan + BoardState (id DESC) とセットで差分配信
 autoReloadJs :: Text
 autoReloadJs =
   T.unlines

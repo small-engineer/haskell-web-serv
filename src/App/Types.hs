@@ -24,6 +24,7 @@ import Data.Time
   , parseTimeM
   )
 
+-- newtypeにすることで誤用を防ぐ
 newtype UserName = UserName { unUserName :: Text }
   deriving (Eq, Ord, Show)
 
@@ -36,6 +37,7 @@ newtype PostId = PostId { unPostId :: Int }
 newtype NonEmptyBody = NonEmptyBody { unBody :: Text }
   deriving (Eq, Show)
 
+-- 投稿作成時刻内部ではUTCTimeとして保持し表示時にのみTextへ変換
 newtype CreatedAt = CreatedAt { unCreatedAt :: UTCTime }
   deriving (Eq, Ord, Show)
 
@@ -81,6 +83,7 @@ parseCreatedAtText t =
         :: Maybe UTCTime
     )
 
+-- 名前から AuthUser を作る 管理者判定もここで行う
 mkAuthUser :: UserName -> AuthUser
 mkAuthUser nm =
   AuthUser nm (nm == UserName "Admin")

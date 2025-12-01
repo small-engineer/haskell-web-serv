@@ -39,6 +39,8 @@ datDir = boardDir ++ "/dat"
 boardTitle :: T.Text
 boardTitle = "mnist-web 掲示板"
 
+-- envBoardChan からのイベントを待ち、投稿更新があったタイミングでのみ dat/subject を再生成する
+-- 5 秒毎のポーリングではなくイベント駆動なので、無駄な I/O / CPU 消費がない
 startBoardExporter :: Env -> IO ()
 startBoardExporter env = do
   _ <- forkIO (loop env)
@@ -50,6 +52,7 @@ loop env =
     atomically (readTChan (envBoardChan env))
     exportOnce env
 
+-- BoardState はメモリ常駐なのでここでは単にTVarを読み出してファイルに書き出すだけ
 exportOnce :: Env -> IO ()
 exportOnce env = do
   st <- readTVarIO (envBoardState env)
