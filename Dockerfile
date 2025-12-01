@@ -4,9 +4,10 @@ WORKDIR /app
 
 COPY stack.yaml stack.yaml.lock mnist-web.cabal Setup.hs ./
 COPY src ./src
+COPY assets ./assets
 
-RUN stack --install-ghc setup \
-    && stack --install-ghc build --copy-bins --local-bin-path /app/bin
+RUN stack setup --install-ghc \
+    && stack build --copy-bins --local-bin-path /app/bin
 
 FROM debian:12-slim
 
@@ -19,6 +20,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=build /app/bin/mnist-web /usr/local/bin/mnist-web
+COPY --from=build /app/assets ./assets
 
 EXPOSE 8080
 

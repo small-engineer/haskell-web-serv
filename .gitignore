@@ -8,6 +8,8 @@ cabal-dev
 *.chs.h
 *.dyn_o
 *.dyn_hi
+*.dat
+*subject.txt
 *.db
 .hpc
 .hsenv

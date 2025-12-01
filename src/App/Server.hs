@@ -48,6 +48,8 @@ app req respond = do
       handleRegister req respond
     ("GET", ["home"]) ->
       handleHome req respond
+    ("GET", ["posts", "updates"]) ->
+      handlePostsUpdates req respond
     ("POST", ["posts"]) ->
       handleCreatePost req respond
     ("POST", ["posts", "delete"]) ->
@@ -140,6 +142,32 @@ handleHome req respond = do
               listRecentPosts conn
           let csrfTok = T.pack (B8.unpack tok)
           respond (htmlResponse status200 (homePage u csrfTok posts))
+
+handlePostsUpdates :: Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
+handlePostsUpdates req respond = do
+  mTok <- extractTokenFromCookie req
+  case mTok of
+    Nothing ->
+      respond (htmlResponse status200 mempty)
+    Just tok -> do
+      mUser <- verifyToken tok
+      case mUser of
+        Nothing ->
+          respond (htmlResponse status200 mempty)
+        Just u -> do
+          posts <-
+            withConn $ \conn ->
+              listRecentPosts conn
+          let qs = queryString req
+          let mAfterBs = lookup "after" qs >>= id
+          let mAfterId = mAfterBs >>= readInt
+          let filtered =
+                case mAfterId of
+                  Nothing  -> []
+                  Just aid -> filter (\p -> postId p > aid) posts
+          let csrfTok = T.pack (B8.unpack tok)
+          let isAdminUser = userName u == "Admin"
+          respond (htmlResponse status200 (postsFragment isAdminUser csrfTok filtered))
 
 handleCreatePost :: Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
 handleCreatePost req respond = do

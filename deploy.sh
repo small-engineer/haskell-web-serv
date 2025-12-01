@@ -22,7 +22,7 @@ terraform apply \
 
 cd "${ROOT_DIR}"
 
-echo "==> Docker image build"
+echo "==> Docker image build (linux/amd64)"
 
 docker buildx build \
   --platform linux/amd64 \
@@ -38,22 +38,18 @@ else
   JWT_SECRET=$(hexdump -n 32 -v -e '/1 "%02x"' /dev/urandom)
 fi
 
-echo "JWT_SECRET length: $(printf "%s" "${JWT_SECRET}" | wc -c | tr -d ' ')"
+JWT_LEN=$(printf '%s' "${JWT_SECRET}" | wc -c | tr -d ' ')
+echo "JWT_SECRET length: ${JWT_LEN}"
 
 echo "==> Docker image を Lightsail に push 中..."
 
-set +e
 aws lightsail push-container-image \
   --region "${AWS_REGION}" \
   --service-name "${SERVICE_NAME}" \
   --label "${LOCAL_IMAGE_NAME}" \
   --image "${LOCAL_IMAGE_NAME}:latest"
-PUSH_RC=$?
-set -e
 
-if [ "${PUSH_RC}" -ne 0 ]; then
-  echo "WARN: aws lightsail push-container-image Error" >&2
-fi
+echo "==> 最新イメージ ID を取得中..."
 
 IMAGE_ID=$(
   aws lightsail get-container-images \
@@ -62,6 +58,11 @@ IMAGE_ID=$(
     --query 'containerImages[-1].image' \
     --output text
 )
+
+if [ -z "${IMAGE_ID}" ] || [ "${IMAGE_ID}" = "None" ]; then
+  echo "ERROR: 取得できるコンテナイメージがありません" >&2
+  exit 1
+fi
 
 echo "==> image id: ${IMAGE_ID}"
 

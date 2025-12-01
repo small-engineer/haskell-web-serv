@@ -5,11 +5,13 @@ module App.Templates
     registerPage,
     homePage,
     htmlResponse,
+    postsFragment
   )
 where
 
 import App.Types
 import Data.Text (Text)
+import qualified Data.Text as T
 import Network.HTTP.Types (Status)
 import Network.Wai (Response, responseLBS)
 import Text.Blaze.Html (Html)
@@ -107,6 +109,9 @@ homePage u csrfTok posts =
       H.link
         H.! A.rel "stylesheet"
         H.! A.href "/style.css"
+      H.script
+        H.! A.type_ "text/javascript" $
+        H.toHtml (autoReloadJs :: Text)
     H.body $ do
       H.h1 "Home"
       H.p $ do
@@ -137,7 +142,9 @@ homePage u csrfTok posts =
               H.! A.type_ "submit" $
               "投稿"
       H.hr
-      H.ul $ mapM_ (renderPost isAdminUser csrfTok) posts
+      H.ul
+        H.! A.id "posts" $
+        mapM_ (renderPost isAdminUser csrfTok) posts
 
 htmlResponse :: Status -> Html -> Response
 htmlResponse st html =
@@ -146,32 +153,76 @@ htmlResponse st html =
     [("Content-Type", "text/html; charset=utf-8")]
     (R.renderHtml html)
 
+postsFragment :: Bool -> Text -> [Post] -> Html
+postsFragment isAdminUser csrfTok ps =
+  mapM_ (renderPost isAdminUser csrfTok) ps
+
 renderPost :: Bool -> Text -> Post -> H.Html
 renderPost isAdminUser csrfTok p =
-  H.li H.! A.style "margin-bottom: 0.5rem;" $ do
-    H.div $ do
-      H.strong (H.toHtml (postAuthor p))
-      H.toHtml (" さん " :: Text)
-      H.span H.! A.style "color: #888; font-size: 0.8rem; margin-left: 0.5rem;" $
-        H.toHtml (postCreatedAt p)
-    H.div $
-      H.toHtml (postBody p)
-    if isAdminUser
-      then do
-        H.form
-          H.! A.method "post"
-          H.! A.action "/posts/delete"
-          H.! A.style "margin-top: 0.25rem;" $ do
-            H.input
-              H.! A.type_ "hidden"
-              H.! A.name "csrf"
-              H.! A.value (H.toValue csrfTok)
-            H.input
-              H.! A.type_ "hidden"
-              H.! A.name "id"
-              H.! A.value (H.toValue (show (postId p)))
-            H.button
-              H.! A.type_ "submit"
-              H.! A.style "font-size: 0.8rem; color: #c00;" $
-              "削除"
-      else pure ()
+  H.li
+    H.! A.style "margin-bottom: 0.5rem;"
+    H.! H.dataAttribute "id" (H.toValue (show (postId p))) $ do
+      H.div $ do
+        H.strong (H.toHtml (postAuthor p))
+        H.toHtml (" さん " :: Text)
+        H.span H.! A.style "color: #888; font-size: 0.8rem; margin-left: 0.5rem;" $
+          H.toHtml (postCreatedAt p)
+      H.div $
+        H.toHtml (postBody p)
+      if isAdminUser
+        then do
+          H.form
+            H.! A.method "post"
+            H.! A.action "/posts/delete"
+            H.! A.style "margin-top: 0.25rem;" $ do
+              H.input
+                H.! A.type_ "hidden"
+                H.! A.name "csrf"
+                H.! A.value (H.toValue csrfTok)
+              H.input
+                H.! A.type_ "hidden"
+                H.! A.name "id"
+                H.! A.value (H.toValue (show (postId p)))
+              H.button
+                H.! A.type_ "submit"
+                H.! A.style "font-size: 0.8rem; color: #c00;" $
+                "削除"
+        else pure ()
+
+autoReloadJs :: Text
+autoReloadJs =
+  T.unlines
+    [ "(function(){"
+    , "  function getLastId(){"
+    , "    var ul = document.getElementById('posts');"
+    , "    if(!ul) return 0;"
+    , "    var first = ul.querySelector('li[data-id]');"
+    , "    if(!first) return 0;"
+    , "    var v = first.getAttribute('data-id');"
+    , "    var n = parseInt(v, 10);"
+    , "    if(isNaN(n)) return 0;"
+    , "    return n;"
+    , "  }"
+    , "  function poll(){"
+    , "    var ul = document.getElementById('posts');"
+    , "    if(!ul) return;"
+    , "    var lastId = getLastId();"
+    , "    var xhr = new XMLHttpRequest();"
+    , "    xhr.open('GET', '/posts/updates?after=' + lastId, true);"
+    , "    xhr.onreadystatechange = function(){"
+    , "      if(xhr.readyState !== 4) return;"
+    , "      if(xhr.status !== 200) return;"
+    , "      if(!xhr.responseText) return;"
+    , "      var tmp = document.createElement('div');"
+    , "      tmp.innerHTML = xhr.responseText;"
+    , "      var items = tmp.querySelectorAll('li');"
+    , "      if(!items || !items.length) return;"
+    , "      for(var i = items.length - 1; i >= 0; i--){"
+    , "        ul.insertBefore(items[i], ul.firstChild);"
+    , "      }"
+    , "    };"
+    , "    xhr.send(null);"
+    , "  }"
+    , "  setInterval(poll, 5000);"
+    , "})();"
+    ]
